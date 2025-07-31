@@ -12,10 +12,14 @@ import os
 
 import telebot
 from telebot import types
+from dotenv import load_dotenv
+import os
 
 from ai_agent.ollama_agent import generate_outfit_with_ollama, analyze_clothing_item
 
-API_KEY = ""
+load_dotenv()  # загружает переменные из .env файла
+
+API_KEY = os.getenv('API_KEY')
 
 bot = telebot.TeleBot(API_KEY, parse_mode=None)  # You can set parse_mode by default. HTML or MARKDOWN
 
