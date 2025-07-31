@@ -35,7 +35,7 @@ def generate_outfit_with_ollama(prompt_text: str, items: list, wardrobe_list: di
     )
 
     data = {
-        "model": "gemma3",
+        "model": "llama3.2:latest",
         "prompt": prompt,
         "stream": True
     }
