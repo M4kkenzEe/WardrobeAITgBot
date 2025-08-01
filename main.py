@@ -8,16 +8,15 @@
 # - ваш стиль итд
 # - добавить обрезания заднего фона при добавлении фото
 # - убрать бесячую надпись во втором сценарии при вводе промпта
-import os
 
-import telebot
-from telebot import types
-from dotenv import load_dotenv
 import os
+import telebot
+from dotenv import load_dotenv
+from telebot import types
 
 from ai_agent.ollama_agent import generate_outfit_with_ollama, analyze_clothing_item
 
-load_dotenv()  # загружает переменные из .env файла
+load_dotenv()
 
 API_KEY = os.getenv('API_KEY')
 
@@ -38,6 +37,7 @@ def escape_markdown(text):
         text = text.replace(char, f'\\{char}')
     return text
 
+
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -55,9 +55,6 @@ def send_welcome(message):
         "👗 *Получить образ от ИИ* — укажите повод, и я подберу стильный образ из ваших вещей!",
         reply_markup=markup
     )
-
-
-# Обработчик нажатий на кнопки
 
 
 @bot.message_handler(content_types=['photo'])
@@ -85,7 +82,6 @@ def handle_photo(message):
     try:
         item_metadata = analyze_clothing_item(file_path)
 
-
     except Exception as e:
         bot.send_message(chat_id, f"⚠️ Не удалось проанализировать фото: {e}")
         return
@@ -112,12 +108,14 @@ def handle_user_input(message):
         user_states[chat_id] = STATE_SCENARIO_2_PROMPT
         bot.send_message(chat_id, "📝 На какое мероприятие вы собираетесь? Опишите кратко.")
         return
-    else:
+
+    elif (state is None and not message.text.startswith('/') and message.content_type == 'text'):
         bot.send_message(chat_id, "❗️ Пожалуйста, выберите один из предложенных сценариев.")
 
     # === Сценарий 1: Фото одежды ===
     if state == STATE_SCENARIO_1_PHOTOS:
-        bot.send_message(chat_id, "📸 Пожалуйста, отправьте фото одежды.")
+        if message.content_type != 'photo':
+            bot.send_message(chat_id, "📸 Пожалуйста, отправьте фото одежды.")
         return
 
     # === Сценарий 2: Генерация образа ===
