@@ -1,20 +1,19 @@
 # Сделать бота ТГ
 # Получение промпта от пользователя фото гардероба:
 # - загрузить фото 1 или более
-# - для загруженных фото обрезать фото
 # - посмотреть фото вещей из гардероба
-# - анализ гардероба с рекомендацией (готовый лук)
-# - готовый лук под конкретную ситацию
 # - ваш стиль итд
-# - добавить обрезания заднего фона при добавлении фото
-# - убрать бесячую надпись во втором сценарии при вводе промпта
 
 import os
+import traceback
+
 import telebot
 from dotenv import load_dotenv
 from telebot import types
 
 from ai_agent.ollama_agent import generate_outfit_with_ollama, analyze_clothing_item
+from ai_agent.semantic_search import build_vector_store, search_similar_items, inspect_chroma_db
+from database.sqlite_init import add_clothing_item, add_user, get_user_clothes, print_users_and_clothes
 
 load_dotenv()
 
@@ -60,38 +59,56 @@ def send_welcome(message):
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     chat_id = message.chat.id
+    username = message.from_user.username or "unknown"
+    language = message.from_user.language_code or "unknown"
 
-    # Проверка, что пользователь в сценарии 1 (загрузка фото)
+    # Проверка, что пользователь в нужном сценарии
     if user_states.get(chat_id) != STATE_SCENARIO_1_PHOTOS:
         bot.send_message(chat_id, "📌 Пожалуйста, сначала выберите сценарий 1 для загрузки фото.")
         return
 
+    # Получение фото
     file_info = bot.get_file(message.photo[-1].file_id)
     downloaded_file = bot.download_file(file_info.file_path)
 
-    # Создаем папку пользователя
+    # Создание пользовательской папки
     user_folder = os.path.join(SAVE_DIR, str(chat_id))
     os.makedirs(user_folder, exist_ok=True)
 
-    # Имя файла
+    # Имя и путь к файлу
     filename = file_info.file_path.split('/')[-1]
-
     file_path = os.path.join(user_folder, filename)
+
+    # Сохраняем файл
     with open(file_path, 'wb') as new_file:
         new_file.write(downloaded_file)
+
+    # Анализ одежды
     try:
         item_metadata = analyze_clothing_item(file_path)
-
     except Exception as e:
         bot.send_message(chat_id, f"⚠️ Не удалось проанализировать фото: {e}")
         return
 
-    # Добавляем метаданные в глобальный словарь пользователя
-    if chat_id not in user_metadata:
-        user_metadata[chat_id] = {}
-    user_metadata[chat_id][filename] = item_metadata
+    # Сохраняем пользователя и одежду в базу данных
+    try:
+        add_user(chat_id, username=username, language=language)
+        add_clothing_item(
+            user_id=chat_id,
+            filename=filename,
+            description=item_metadata.get("description", ""),
+            season=", ".join(item_metadata.get("season", [])),
+            sex=item_metadata.get("sex", ""),
+            image_path=file_path
+        )
+        build_vector_store(chat_id)
 
-    bot.send_message(chat_id, f"✅ Фото '{filename}' добавлено и проанализировано.")
+        bot.send_message(chat_id, f"✅ Фото '{filename}' добавлено, проанализировано и сохранено.")
+    except Exception as db_err:
+        bot.send_message(chat_id, f"❌ Ошибка при сохранении в БД: {db_err}")
+
+    inspect_chroma_db()
+    print_users_and_clothes()
 
 
 @bot.message_handler(func=lambda message: True)
@@ -136,8 +153,41 @@ def handle_user_input(message):
         bot.send_message(chat_id, "🧠 Генерирую персональный образ...")
 
         try:
-            # Генерация ответа от Ollama
-            result = generate_outfit_with_ollama(prompt, files, user_metadata)
+
+            # 📌 Сначала — семантический поиск подходящих вещей
+            try:
+                similar_items = search_similar_items(chat_id, prompt, top_k=5)
+                selected_filenames = [item["filename"] for item in similar_items]
+            except Exception as e:
+                bot.send_message(chat_id, f"❌ Ошибка в поиске похожих вещей: {e}")
+                return
+
+            if not selected_filenames:
+                bot.send_message(chat_id, "😕 Не удалось найти подходящие вещи по запросу.")
+                return
+
+            # Получаем всю одежду из БД
+            all_clothes = get_user_clothes(chat_id)
+
+            # Формируем словарь метаданных
+            clothing_dict = {
+                row[0]: {  # row[0] — filename
+                    "description": row[1],
+                    "season": row[2].split(", ") if row[2] else [],
+                    "sex": row[3],
+                    "image_path": row[4]
+                }
+                for row in all_clothes
+            }
+
+            filtered_metadata = {
+                fname: clothing_dict[fname]
+                for fname in selected_filenames if fname in clothing_dict
+            }
+
+            # Генерация через Ollama уже по отобранным вещам
+            result = generate_outfit_with_ollama(prompt, selected_filenames, filtered_metadata)
+
             if not result:
                 bot.send_message(chat_id, "❌ Ошибка при генерации образа.")
                 return
@@ -169,6 +219,7 @@ def handle_user_input(message):
 
         except Exception as e:
             print(f"[Ollama error] {e}")
+            traceback.print_exc()
             bot.send_message(chat_id, "❌ Произошла ошибка при генерации образа.")
 
         # Очистка состояния
