@@ -27,3 +27,8 @@ urllib3~=2.5.0
 charset-normalizer~=3.4.2
 packaging~=25.0
 python-dotenv~=1.1.1
+langchain
+faiss-cpu
+sentence-transformers
+langchain-community
+chromadb

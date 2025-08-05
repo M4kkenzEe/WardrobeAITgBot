@@ -1,5 +1,7 @@
 import base64
 import json
+import traceback
+
 import requests
 
 OLLAMA_URL = 'http://localhost:11434/api/generate'
@@ -35,7 +37,7 @@ def generate_outfit_with_ollama(prompt_text: str, items: list, wardrobe_list: di
     )
 
     data = {
-        "model": "llama3.2:latest",
+        "model": "gemma3",
         "prompt": prompt,
         "stream": True
     }
@@ -53,6 +55,7 @@ def generate_outfit_with_ollama(prompt_text: str, items: list, wardrobe_list: di
         return full_response.strip()
     except Exception as e:
         print(f"[Ollama error] {e}")
+        traceback.print_exc()
         return None
 
 
